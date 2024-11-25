@@ -1,23 +1,34 @@
-from pyswip import Prolog
+import subprocess
 
 class PrologInterface:
     def __init__(self, prolog_file):
-        self.prolog = Prolog()
-        self.prolog.consult(prolog_file)
+        self.prolog_file = prolog_file
 
-    def update_gpa_threshold(self, new_threshold):
-        self.prolog.query("retractall(default_gpa_threshold(_))")
-        self.prolog.assertz(f"default_gpa_threshold({new_threshold})")
-        print(f"Default GPA threshold updated to {new_threshold} in Prolog.")
+    def _run_prolog_query(self, query):
+        result = subprocess.run(['swipl', '-s', self.prolog_file, '-g', query, '-t', 'halt'], capture_output=True, text=True)
+        return result.stdout
 
     def calculate_gpa(self, grade_points, credits):
-        result = list(self.prolog.query(f"calculate_gpa_by_semester({grade_points}, {credits}, GPA)"))
-        return result[0]['GPA'] if result else None
+        query = f"calculate_gpa({grade_points}, {credits}, GPA)."
+        result = self._run_prolog_query(query)
+        try:
+            return float(result.strip())
+        except ValueError:
+            return None
 
-    def calculate_cumulative_gpa(self, grade_points, credits):
-        result = list(self.prolog.query(f"calculate_cumulative_gpa({grade_points}, {credits}, CumulativeGPA)"))
-        return result[0]['CumulativeGPA'] if result else None
+    def calculate_cumulative_gpa(self, all_grade_points, all_credits):
+        query = f"calculate_cumulative_gpa({all_grade_points}, {all_credits}, CumulativeGPA)."
+        result = self._run_prolog_query(query)
+        try:
+            return float(result.strip())
+        except ValueError:
+            return None
 
     def check_academic_probation(self, cumulative_gpa):
-        result = list(self.prolog.query(f"academic_probation({cumulative_gpa})"))
-        return bool(result)
+        query = f"check_academic_probation({cumulative_gpa}, ProbationStatus)."
+        result = self._run_prolog_query(query)
+        return "true" in result
+
+    def update_gpa_threshold(self, new_threshold):
+        query = f"update_gpa_threshold({new_threshold})."
+        self._run_prolog_query(query)

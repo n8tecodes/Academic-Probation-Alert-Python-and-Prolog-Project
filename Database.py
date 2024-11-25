@@ -1,5 +1,6 @@
 import mysql.connector
 from tkinter import messagebox
+import re
 
 class Database:
     def __init__(self, host, user, password, database):
@@ -22,11 +23,31 @@ class Database:
             print(f"Error: {err}")
             return None
 
-    # CRUD operations for StudentMaster
+    # Validate Email format
+    def is_valid_email(self, email):
+        email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+        return re.match(email_regex, email) is not None
+
+    # Validate that the value is a valid number
+    def is_valid_number(self, value):
+        try:
+            float(value)
+            return True
+        except ValueError:
+            return False
+
+    # CRUD operations for StudentMaster with validation
     def add_student(self, student_id, student_name, student_email, school, programme):
+        if not student_id or not student_name or not student_email or not school or not programme:
+            messagebox.showerror("Error", "All fields must be filled.")
+            return
+        if not self.is_valid_email(student_email):
+            messagebox.showerror("Error", "Invalid email format.")
+            return
+        
         cursor = self.conn.cursor()
         try:
-            cursor.execute("""
+            cursor.execute(""" 
                 INSERT INTO StudentMaster (student_id, student_name, student_email, school, programme)
                 VALUES (%s, %s, %s, %s, %s);
             """, (student_id, student_name, student_email, school, programme))
@@ -45,9 +66,16 @@ class Database:
         return students
 
     def update_student(self, student_id, student_name, student_email, school, programme):
+        if not student_id or not student_name or not student_email or not school or not programme:
+            messagebox.showerror("Error", "All fields must be filled.")
+            return
+        if not self.is_valid_email(student_email):
+            messagebox.showerror("Error", "Invalid email format.")
+            return
+        
         cursor = self.conn.cursor()
         try:
-            cursor.execute("""
+            cursor.execute(""" 
                 UPDATE StudentMaster
                 SET student_name = %s, student_email = %s, school = %s, programme = %s
                 WHERE student_id = %s;
@@ -60,6 +88,10 @@ class Database:
             cursor.close()
 
     def delete_student(self, student_id):
+        if not student_id:
+            messagebox.showerror("Error", "Student ID must be provided.")
+            return
+
         cursor = self.conn.cursor()
         try:
             cursor.execute("DELETE FROM StudentMaster WHERE student_id = %s;", (student_id,))
@@ -70,8 +102,15 @@ class Database:
         finally:
             cursor.close()
 
-    # CRUD operations for ModuleMaster
+    # CRUD operations for ModuleMaster with validation
     def add_module(self, module_code, module_name, credits):
+        if not module_code or not module_name or not credits:
+            messagebox.showerror("Error", "All fields must be filled.")
+            return
+        if not self.is_valid_number(credits):
+            messagebox.showerror("Error", "Credits must be a valid number.")
+            return
+
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -93,6 +132,13 @@ class Database:
         return modules
 
     def update_module(self, module_code, module_name, credits):
+        if not module_code or not module_name or not credits:
+            messagebox.showerror("Error", "All fields must be filled.")
+            return
+        if not self.is_valid_number(credits):
+            messagebox.showerror("Error", "Credits must be a valid number.")
+            return
+
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -108,6 +154,10 @@ class Database:
             cursor.close()
 
     def delete_module(self, module_code):
+        if not module_code:
+            messagebox.showerror("Error", "Module Code must be provided.")
+            return
+
         cursor = self.conn.cursor()
         try:
             cursor.execute("DELETE FROM ModuleMaster WHERE module_code = %s;", (module_code,))
@@ -118,8 +168,15 @@ class Database:
         finally:
             cursor.close()
 
-    # CRUD operations for ModuleDetails
+    # CRUD operations for ModuleDetails with validation
     def add_module_detail(self, student_id, module_code, year, semester, grade_points):
+        if not student_id or not module_code or not year or not semester or not grade_points:
+            messagebox.showerror("Error", "All fields must be filled.")
+            return
+        if not self.is_valid_number(grade_points):
+            messagebox.showerror("Error", "Grade points must be a valid number.")
+            return
+
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -141,6 +198,13 @@ class Database:
         return module_details
 
     def update_module_detail(self, id, student_id, module_code, year, semester, grade_points):
+        if not student_id or not module_code or not year or not semester or not grade_points:
+            messagebox.showerror("Error", "All fields must be filled.")
+            return
+        if not self.is_valid_number(grade_points):
+            messagebox.showerror("Error", "Grade points must be a valid number.")
+            return
+
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -156,6 +220,10 @@ class Database:
             cursor.close()
 
     def delete_module_detail(self, id):
+        if not id:
+            messagebox.showerror("Error", "ID must be provided.")
+            return
+
         cursor = self.conn.cursor()
         try:
             cursor.execute("DELETE FROM ModuleDetails WHERE id = %s;", (id,))
@@ -165,15 +233,27 @@ class Database:
             messagebox.showerror("Error", f"Failed to delete module detail: {err}")
         finally:
             cursor.close()
-
+    # Fetch grades for a student in a specific year
     def get_student_grades(self, student_id, year):
+        # Validate inputs
+        if not student_id or not self.is_valid_number(student_id):
+            messagebox.showerror("Error", "Invalid student ID.")
+            return []
+        if not year or not self.is_valid_number(year):
+            messagebox.showerror("Error", "Invalid year.")
+            return []
+
         cursor = self.conn.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT d.grade_points, m.credits, d.semester
-            FROM ModuleDetails d
-            JOIN ModuleMaster m ON d.module_code = m.module_code
-            WHERE d.student_id = %s AND d.year = %s;
-        """, (student_id, year))
-        grades = cursor.fetchall()
-        cursor.close()
-        return grades
+        try:
+            cursor.execute("""
+                SELECT d.grade_points, m.credits, d.semester
+                FROM ModuleDetails d
+                JOIN ModuleMaster m ON d.module_code = m.module_code
+                WHERE d.student_id = %s AND d.year = %s;
+            """, (student_id, year))
+            grades = cursor.fetchall()
+            cursor.close()
+            return grades
+        except mysql.connector.Error as err:
+            messagebox.showerror("Error", f"Failed to fetch grades: {err}")
+            return []
