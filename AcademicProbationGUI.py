@@ -1,117 +1,16 @@
-from pyswip import Prolog
-import mysql.connector
 import tkinter as tk
 from tkinter import messagebox
 
-# Database connection function
-def connect_to_database():
-    try:
-        conn = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="Abc123@!",
-            database="academicprobationsystem"
-        )
-        return conn
-    except mysql.connector.Error as err:
-        print(f"Error: {err}")
-        return None
+from Database import Database
+from PrologInterface import PrologInterface
 
-# Initialize Prolog
-prolog = Prolog()
-prolog.consult("gpa_calculator.pl")  # Load the Prolog file
-
-# Function to update the default GPA threshold in Prolog
-def update_gpa_threshold(new_threshold):
-    # Remove any existing default_gpa_threshold facts
-    prolog.query("retractall(default_gpa_threshold(_))")
-    # Assert the new GPA threshold
-    prolog.assertz(f"default_gpa_threshold({new_threshold})")
-    print(f"Default GPA threshold updated to {new_threshold} in Prolog.")
-
-# Function to calculate GPA and check probation status
-def check_student_academic_probation(conn, student_id, year):
-    cursor = conn.cursor(dictionary=True)
-
-    # Retrieve grade points and credits for each semester from the database
-    cursor.execute("""
-        SELECT d.grade_points, m.credits, d.semester
-        FROM ModuleDetails d
-        JOIN ModuleMaster m ON d.module_code = m.module_code
-        WHERE d.student_id = %s AND d.year = %s;
-    """, (student_id, year))
-
-    semester1_grade_points = []
-    semester1_credits = []
-    semester2_grade_points = []
-    semester2_credits = []
-
-    # Populate grade points and credits lists for each semester
-    for row in cursor:
-        if row['semester'] == 1:
-            semester1_grade_points.append(row['grade_points'] * row['credits'])
-            semester1_credits.append(row['credits'])
-        elif row['semester'] == 2:
-            semester2_grade_points.append(row['grade_points'] * row['credits'])
-            semester2_credits.append(row['credits'])
-
-    cursor.close()
-
-    # Calculate semester GPAs using Prolog
-    semester1_gpa = None
-    if semester1_grade_points and semester1_credits:
-        result = list(prolog.query(f"calculate_gpa_by_semester({semester1_grade_points}, {semester1_credits}, GPA)"))
-        semester1_gpa = result[0]['GPA'] if result else None
-
-    semester2_gpa = None
-    if semester2_grade_points and semester2_credits:
-        result = list(prolog.query(f"calculate_gpa_by_semester({semester2_grade_points}, {semester2_credits}, GPA)"))
-        semester2_gpa = result[0]['GPA'] if result else None
-
-    # Calculate cumulative GPA using Prolog
-    all_grade_points = semester1_grade_points + semester2_grade_points
-    all_credits = semester1_credits + semester2_credits
-    cumulative_gpa = None
-    if all_grade_points and all_credits:
-        result = list(prolog.query(f"calculate_cumulative_gpa({all_grade_points}, {all_credits}, CumulativeGPA)"))
-        cumulative_gpa = result[0]['CumulativeGPA'] if result else None
-
-    # Check academic probation status using cumulative GPA
-    if cumulative_gpa is not None:
-        probation_query = list(prolog.query(f"academic_probation({cumulative_gpa})"))
-        on_probation = bool(probation_query)
-    else:
-        on_probation = False
-
-    return semester1_gpa, semester2_gpa, cumulative_gpa, on_probation
-
-# Function to add a new student to the database
-def add_student(conn, student_id, student_name, student_email, school, programme):
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            INSERT INTO StudentMaster (student_id, student_name, student_email, school, programme)
-            VALUES (%s, %s, %s, %s, %s);
-        """, (student_id, student_name, student_email, school, programme))
-        conn.commit()
-        messagebox.showinfo("Success", "Student added successfully.")
-    except mysql.connector.Error as err:
-        messagebox.showerror("Error", f"Failed to add student: {err}")
-    finally:
-        cursor.close()
-
-# GUI Class
 class AcademicProbationGUI:
-    def __init__(self, root):
+    def __init__(self, root, db, prolog_interface):
         self.root = root
+        self.db = db
+        self.prolog_interface = prolog_interface
         self.root.title("Academic Probation System")
-        self.root.geometry("600x500")  # Set window size
-
-        self.conn = connect_to_database()
-        if not self.conn:
-            messagebox.showerror("Error", "Failed to connect to the database.")
-            return
-
+        self.root.geometry("600x500")
         self.create_widgets()
 
     def create_widgets(self):
@@ -223,7 +122,7 @@ class AcademicProbationGUI:
         if action == "yes":
             try:
                 new_threshold = float(input("Enter the new GPA threshold (e.g., 2.5): ").strip())
-                update_gpa_threshold(new_threshold)
+                self.prolog_interface.update_gpa_threshold(new_threshold)
                 messagebox.showinfo("Success", f"Default GPA threshold updated to {new_threshold}.")
             except ValueError:
                 messagebox.showerror("Error", "Invalid input. Please enter a numeric GPA threshold.")
@@ -231,8 +130,31 @@ class AcademicProbationGUI:
     def check_student_status(self):
         student_id = self.student_id_entry.get().strip()
         year = self.year_entry.get().strip()
-        semester1_gpa, semester2_gpa, cumulative_gpa, on_probation = check_student_academic_probation(self.conn, student_id, year)
+        grades = self.db.get_student_grades(student_id, year)
+
+        semester1_grade_points = []
+        semester1_credits = []
+        semester2_grade_points = []
+        semester2_credits = []
+
+        for row in grades:
+            if row['semester'] == 1:
+                semester1_grade_points.append(row['grade_points'] * row['credits'])
+                semester1_credits.append(row['credits'])
+            elif row['semester'] == 2:
+                semester2_grade_points.append(row['grade_points'] * row['credits'])
+                semester2_credits.append(row['credits'])
+
+        semester1_gpa = self.prolog_interface.calculate_gpa(semester1_grade_points, semester1_credits) if semester1_grade_points and semester1_credits else None
+        semester2_gpa = self.prolog_interface.calculate_gpa(semester2_grade_points, semester2_credits) if semester2_grade_points and semester2_credits else None
+
+        all_grade_points = semester1_grade_points + semester2_grade_points
+        all_credits = semester1_credits + semester2_credits
+        cumulative_gpa = self.prolog_interface.calculate_cumulative_gpa(all_grade_points, all_credits) if all_grade_points and all_credits else None
+
+        on_probation = self.prolog_interface.check_academic_probation(cumulative_gpa) if cumulative_gpa is not None else False
         status = "on academic probation" if on_probation else "in good standing"
+
         messagebox.showinfo("GPA Status", f"Student {student_id}'s Semester 1 GPA is {semester1_gpa}, Semester 2 GPA is {semester2_gpa}, Cumulative GPA is {cumulative_gpa}. They are {status}.")
 
     def add_student(self):
@@ -252,7 +174,7 @@ class AcademicProbationGUI:
             messagebox.showerror("Error", "Student ID must be an integer.")
             return
 
-        add_student(self.conn, student_id, student_name, student_email, school, programme)
+        self.db.add_student(student_id, student_name, student_email, school, programme)
 
     def clear_widgets(self):
         for widget in self.root.winfo_children():
@@ -261,7 +183,9 @@ class AcademicProbationGUI:
 # Main function
 def main():
     root = tk.Tk()
-    app = AcademicProbationGUI(root)
+    db = Database(host="localhost", user="root", password="Abc123@!", database="academicprobationsystem")
+    prolog_interface = PrologInterface(prolog_file="gpa_calculator.pl")
+    app = AcademicProbationGUI(root, db, prolog_interface)
     root.mainloop()
 
 if __name__ == "__main__":
